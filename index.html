@@ -1,0 +1,1022 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>満員電車シミュレーター</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #111118;
+  display: flex; justify-content: center; align-items: center;
+  min-height: 100vh; font-family: 'Helvetica Neue', Arial, sans-serif; overflow: hidden;
+}
+#gameContainer { position: relative; display: flex; flex-direction: column; align-items: center; }
+#hud {
+  display: flex; justify-content: space-between; align-items: center;
+  width: 420px; padding: 8px 14px;
+  background: linear-gradient(135deg, #16213e, #0f3460);
+  border-radius: 10px 10px 0 0; color: #e0e0e0; font-size: 13px;
+  border: 2px solid #1a3a6a; border-bottom: none;
+}
+.hud-item { display: flex; align-items: center; gap: 5px; }
+.station-dots { display: flex; gap: 3px; }
+.station-dot {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: #2a2a4a; border: 2px solid #3a3a5a; transition: all 0.3s;
+}
+.station-dot.passed { background: #e94560; border-color: #e94560; }
+#timer { font-size: 20px; font-weight: bold; color: #f5c518; }
+canvas { border: 2px solid #1a3a6a; border-top: none; display: block; touch-action: none; max-width: 100vw; }
+@media (max-width: 440px) {
+  #hud, #bottomBar { width: 100vw; font-size: 11px; padding: 6px 8px; border-radius: 0; }
+  canvas { width: 100vw; height: auto; }
+  #overlay, #startScreen { border-radius: 0; }
+}
+#bottomBar {
+  width: 420px; padding: 6px 0; text-align: center;
+  background: linear-gradient(135deg, #0f3460, #16213e);
+  border-radius: 0 0 10px 10px; color: #667; font-size: 11px;
+  border: 2px solid #1a3a6a; border-top: none;
+}
+#overlay {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  display: none; justify-content: center; align-items: center;
+  background: rgba(0,0,0,0.8); z-index: 10; border-radius: 10px;
+}
+#overlay.show { display: flex; }
+#overlayContent {
+  text-align: center; padding: 36px; background: linear-gradient(135deg, #16213e, #1a1a3e);
+  border-radius: 16px; border: 2px solid #e94560; max-width: 380px;
+}
+#overlayContent h1 { font-size: 22px; margin-bottom: 14px; line-height: 1.6; }
+.win { color: #4ade80; } .lose { color: #e94560; }
+#overlayContent button, #startContent button {
+  margin-top: 16px; padding: 12px 36px; font-size: 16px;
+  background: #e94560; color: white; border: none; border-radius: 8px;
+  cursor: pointer; transition: background 0.2s;
+}
+#overlayContent button:hover, #startContent button:hover { background: #c73a52; }
+#startScreen {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  display: flex; justify-content: center; align-items: center;
+  background: rgba(0,0,0,0.9); z-index: 20; border-radius: 10px;
+}
+#startContent { text-align: center; padding: 30px; }
+#startContent h1 { font-size: 32px; color: #f5c518; margin-bottom: 6px; }
+#startContent .sub { color: #999; font-size: 13px; margin-bottom: 20px; }
+#startContent .rules {
+  color: #ccc; font-size: 12px; text-align: left;
+  margin-bottom: 20px; line-height: 2; max-width: 320px;
+}
+#startContent button { animation: pulse 1.5s infinite; }
+@keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.05)} }
+#announce {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  background: rgba(0,0,0,0.85); color: #f5c518; padding: 14px 28px;
+  border-radius: 8px; font-size: 18px; font-weight: bold;
+  z-index: 5; display: none; white-space: nowrap; border: 2px solid #f5c518;
+}
+#announce.show { display: block; }
+</style>
+</head>
+<body>
+<div id="gameContainer">
+  <div id="hud">
+    <div class="hud-item">
+      <span>🚃</span>
+      <div class="station-dots">
+        <div class="station-dot" id="sd0"></div>
+        <div class="station-dot" id="sd1"></div>
+        <div class="station-dot" id="sd2"></div>
+        <div class="station-dot" id="sd3"></div>
+        <div class="station-dot" id="sd4"></div>
+      </div>
+    </div>
+    <div class="hud-item"><span id="stationName">走行中...</span></div>
+    <div class="hud-item"><span>⏱</span><span id="timer">0:15</span></div>
+    <div class="hud-item"><span>👥</span><span id="crowdCount">0</span></div>
+  </div>
+  <canvas id="c" width="420" height="640"></canvas>
+  <div id="bottomBar">矢印キー / WASD / タップで移動 ｜ 空いた席に移動して座ろう！</div>
+  <div id="overlay"><div id="overlayContent"><h1 id="resultMsg"></h1><button onclick="restartGame()">もう一度遊ぶ</button></div></div>
+  <div id="startScreen"><div id="startContent">
+    <h1>🚃 満員電車 🚃</h1>
+    <div class="sub">～ 座れたら奇跡 ～</div>
+    <div class="rules">
+      ▶ 矢印キー / WASD / タップで移動<br>
+      ▶ 空いた席に移動すると座れます<br>
+      ▶ 15秒ごとに駅に到着（全5駅）<br>
+      ▶ 駅で降りる人がいると席が空くチャンス！<br>
+      ▶ でも周りの人も座ろうとします…<br>
+      ▶ 終着駅までに座れればクリア！
+    </div>
+    <button onclick="startGame()">乗車する</button>
+  </div></div>
+  <div id="announce"></div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const CW = canvas.width, CH = canvas.height;
+
+const CELL = 60;
+const COLS = 5;   // leftSeat(0) | aisle(1,2,3) | rightSeat(4)
+const ROWS = 11;  // wall(0) | door(1) | seats(2-8) | door(9) | wall(10)
+const OX = (CW - COLS * CELL) / 2;
+const OY = (CH - ROWS * CELL) / 2;
+
+const STATIONS = ['新宿','渋谷','池袋','東京','品川'];
+const SEAT_L = 0, SEAT_R = 4, SEAT_R1 = 2, SEAT_R2 = 8;
+const DOOR_ROWS = [1, 9];
+const AISLE = [1, 2, 3];
+
+// facing: 'l','r','u','d'
+const TYPES = [
+  { name:'サラリーマン', hair:'short', hairC:'#1a1a2e', skinC:'#f0c8a0', bodyC:'#2c3e50', accC:'#c0392b', acc:'tie', gender:'m' },
+  { name:'サラリーマン', hair:'short', hairC:'#2c2c3c', skinC:'#e8c098', bodyC:'#1a252f', accC:'#2980b9', acc:'tie', gender:'m' },
+  { name:'OL',          hair:'ponytail', hairC:'#2c1810', skinC:'#f5d0b0', bodyC:'#6c3483', accC:'#f8c471', acc:'bag', gender:'f' },
+  { name:'主婦',        hair:'bob', hairC:'#3e2723', skinC:'#f0c8a0', bodyC:'#e91e63', accC:'#f9e79f', acc:'bag', gender:'f' },
+  { name:'女子高生',    hair:'long', hairC:'#1b0f05', skinC:'#f5d5b5', bodyC:'#1a5276', accC:'#e74c3c', acc:'ribbon', gender:'f' },
+  { name:'女子高生',    hair:'twintail', hairC:'#2c1810', skinC:'#f5d0b0', bodyC:'#117a65', accC:'#f5b041', acc:'ribbon', gender:'f' },
+  { name:'大学生♂',    hair:'messy', hairC:'#1a1a1a', skinC:'#e8c098', bodyC:'#7d3c98', accC:'#3498db', acc:'headphones', gender:'m' },
+  { name:'大学生♀',    hair:'long', hairC:'#4a2c20', skinC:'#f5d5b5', bodyC:'#28b463', accC:'#e67e22', acc:'backpack', gender:'f' },
+  { name:'おじさん',    hair:'bald', hairC:'#5a5a5a', skinC:'#e0b888', bodyC:'#7f8c8d', accC:'#d4ac0d', acc:'none', gender:'m' },
+  { name:'おばさん',    hair:'perm', hairC:'#4a3728', skinC:'#f0c8a0', bodyC:'#a569bd', accC:'#eb984e', acc:'bag', gender:'f' },
+  { name:'カップル♂',  hair:'short', hairC:'#222', skinC:'#e8c098', bodyC:'#2e86c1', accC:'#e74c3c', acc:'none', gender:'m' },
+  { name:'カップル♀',  hair:'long', hairC:'#5a3825', skinC:'#f5d5b5', bodyC:'#f06292', accC:'#fff', acc:'none', gender:'f' },
+  { name:'外国人',      hair:'short', hairC:'#d4a050', skinC:'#f5deb3', bodyC:'#17a2b8', accC:'#e74c3c', acc:'backpack', gender:'m' },
+  { name:'高校生♂',    hair:'messy', hairC:'#111', skinC:'#e8c098', bodyC:'#2e4053', accC:'#f39c12', acc:'backpack', gender:'m' },
+];
+
+const STATION_INTERVAL = 15;
+
+let seats = [], npcs = [], player = null;
+let gameState = 'start', station = 0, timer = STATION_INTERVAL, frame = 0, npcId = 0;
+let winGlowTimer = 0;  // frames of pink glow before showing win overlay
+let boardingAnims = []; // {col, row, entering: bool, progress: 0-1, type}
+
+function initSeats() {
+  seats = []; let id = 0;
+  for (let r = SEAT_R1; r <= SEAT_R2; r++) {
+    seats.push({ id: id++, col: SEAT_L, row: r, occupied: null });
+    seats.push({ id: id++, col: SEAT_R, row: r, occupied: null });
+  }
+}
+function seatAt(c, r) { return seats.find(s => s.col === c && s.row === r); }
+function isSeat(c, r) { return !!seatAt(c, r); }
+function inBounds(c, r) {
+  if (c < 0 || c >= COLS || r < 0 || r >= ROWS) return false;
+  if (r === 0 || r === ROWS - 1) return false;
+  if (c === SEAT_L || c === SEAT_R) return isSeat(c, r) || DOOR_ROWS.includes(r);
+  return true;
+}
+function occupied(c, r) {
+  if (player && player.col === c && player.row === r) return true;
+  return npcs.some(n => n.col === c && n.row === r && !n.exiting);
+}
+function shuffle(a) { for (let i = a.length-1; i > 0; i--) { const j = Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+function randi(a, b) { return Math.floor(Math.random()*(b-a+1))+a; }
+
+// Determine NPC facing based on position
+function facingFor(col, isSeated) {
+  if (isSeated) {
+    return col === SEAT_L ? 'r' : 'l';  // seated people face toward aisle
+  }
+  // Standing: face toward nearest seat wall
+  if (col === 1) return 'l';  // face left seats
+  if (col === 3) return 'r';  // face right seats
+  return Math.random() < 0.5 ? 'l' : 'r';  // middle aisle, either way
+}
+
+function mkNpc(c, r, seated, seatId) {
+  const t = TYPES[Math.floor(Math.random() * TYPES.length)];
+  const f = facingFor(c, seated);
+  const n = { id: npcId++, col: c, row: r, type: t, standing: !seated, seatId: seatId??null, exiting: false, facing: f };
+  npcs.push(n);
+  return n;
+}
+
+function init() {
+  npcs = []; npcId = 0; station = 0; timer = STATION_INTERVAL; frame = 0;
+  winGlowTimer = 0; boardingAnims = [];
+  initSeats();
+
+  // Fill all seats
+  for (const s of seats) {
+    const n = mkNpc(s.col, s.row, true, s.id);
+    s.occupied = n.id;
+  }
+
+  // Standing NPCs - primarily in col 1 and col 3 (in front of seats), fewer in col 2
+  const standSpots = [];
+  // Prioritize standing in front of seats
+  for (let r = SEAT_R1; r <= SEAT_R2; r++) {
+    standSpots.push({ col: 1, row: r, priority: 1 });
+    standSpots.push({ col: 3, row: r, priority: 1 });
+  }
+  // Some in middle aisle and door areas
+  for (let r = 1; r <= ROWS - 2; r++) {
+    standSpots.push({ col: 2, row: r, priority: 2 });
+  }
+  // Door area standing
+  for (const dr of DOOR_ROWS) {
+    standSpots.push({ col: 1, row: dr, priority: 3 });
+    standSpots.push({ col: 3, row: dr, priority: 3 });
+  }
+
+  // Sort by priority, then shuffle within same priority
+  standSpots.sort((a, b) => a.priority - b.priority);
+
+  const standCount = randi(10, 14);
+  let placed = 0;
+  const used = new Set();
+  for (const p of standSpots) {
+    if (placed >= standCount) break;
+    const key = `${p.col},${p.row}`;
+    if (used.has(key)) continue;
+    if (!occupied(p.col, p.row)) {
+      mkNpc(p.col, p.row, false);
+      used.add(key);
+      placed++;
+    }
+  }
+
+  // Player at bottom door, middle of aisle
+  player = { col: 2, row: 9, seated: false, seatId: null, facing: 'u' };
+  npcs = npcs.filter(n => !(n.col === player.col && n.row === player.row));
+  updateHud();
+}
+
+// ── Drawing ──────────────────────────────────────────
+
+function px(c) { return OX + c * CELL; }
+function py(r) { return OY + r * CELL; }
+
+function drawTrain() {
+  ctx.fillStyle = '#1a1a28'; ctx.fillRect(0, 0, CW, CH);
+
+  // Train body
+  const tx = OX - 12, ty = OY - 4, tw = COLS * CELL + 24, th = ROWS * CELL + 8;
+  ctx.fillStyle = '#8a9bae';
+  ctx.beginPath(); ctx.roundRect(tx, ty, tw, th, 14); ctx.fill();
+
+  // Floor
+  ctx.fillStyle = '#c8b896';
+  ctx.fillRect(OX, OY, COLS * CELL, ROWS * CELL);
+  ctx.strokeStyle = '#baa880'; ctx.lineWidth = 0.5;
+  for (let c = 0; c <= COLS; c++) { ctx.beginPath(); ctx.moveTo(px(c), OY); ctx.lineTo(px(c), OY + ROWS*CELL); ctx.stroke(); }
+  for (let r = 0; r <= ROWS; r++) { ctx.beginPath(); ctx.moveTo(OX, py(r)); ctx.lineTo(OX + COLS*CELL, py(r)); ctx.stroke(); }
+
+  // End walls
+  ctx.fillStyle = '#5a6a7a';
+  ctx.fillRect(OX, py(0), COLS*CELL, CELL);
+  ctx.fillRect(OX, py(ROWS-1), COLS*CELL, CELL);
+  for (const wr of [0, ROWS-1]) {
+    ctx.fillStyle = '#4a5a6a'; ctx.fillRect(OX+8, py(wr)+8, COLS*CELL-16, CELL-16);
+    ctx.fillStyle = '#6a7a8a'; ctx.fillRect(OX+14, py(wr)+14, COLS*CELL-28, CELL-28);
+    ctx.fillStyle = '#89CFF0'; ctx.fillRect(OX+COLS*CELL/2-20, py(wr)+18, 40, CELL-36);
+    ctx.strokeStyle = '#4a5a6a'; ctx.lineWidth = 2; ctx.strokeRect(OX+COLS*CELL/2-20, py(wr)+18, 40, CELL-36);
+  }
+
+  // Side walls + windows
+  for (let r = 1; r < ROWS-1; r++) {
+    if (!DOOR_ROWS.includes(r)) {
+      ctx.fillStyle = '#6a7a8a';
+      ctx.fillRect(OX-10, py(r), 12, CELL);
+      ctx.fillStyle = '#89CFF0'; ctx.fillRect(OX-8, py(r)+12, 8, CELL-24);
+      ctx.strokeStyle = '#5a6a7a'; ctx.lineWidth = 1.5; ctx.strokeRect(OX-8, py(r)+12, 8, CELL-24);
+
+      ctx.fillStyle = '#6a7a8a';
+      ctx.fillRect(OX+COLS*CELL-2, py(r), 12, CELL);
+      ctx.fillStyle = '#89CFF0'; ctx.fillRect(OX+COLS*CELL, py(r)+12, 8, CELL-24);
+      ctx.strokeStyle = '#5a6a7a'; ctx.strokeRect(OX+COLS*CELL, py(r)+12, 8, CELL-24);
+    }
+  }
+
+  // Doors
+  for (const dr of DOOR_ROWS) {
+    const ldy = py(dr);
+    const dc = gameState === 'arriving' ? '#7ec8e3' : '#5dade2';
+    ctx.fillStyle = dc; ctx.fillRect(OX-6, ldy+4, 10, CELL-8);
+    ctx.strokeStyle = '#3a8fc2'; ctx.lineWidth = 1; ctx.strokeRect(OX-6, ldy+4, 10, CELL-8);
+    ctx.fillStyle = '#fff'; ctx.fillRect(OX-2, ldy+CELL/2-4, 2, 8);
+    ctx.fillStyle = dc; ctx.fillRect(OX+COLS*CELL-4, ldy+4, 10, CELL-8);
+    ctx.strokeStyle = '#3a8fc2'; ctx.strokeRect(OX+COLS*CELL-4, ldy+4, 10, CELL-8);
+    ctx.fillStyle = '#fff'; ctx.fillRect(OX+COLS*CELL, ldy+CELL/2-4, 2, 8);
+    ctx.fillStyle = 'rgba(93,173,226,0.15)'; ctx.fillRect(px(0), ldy, COLS*CELL, CELL);
+  }
+
+  // Grab rails
+  ctx.strokeStyle = 'rgba(160,160,170,0.5)'; ctx.lineWidth = 2;
+  for (const ac of AISLE) {
+    ctx.beginPath(); ctx.moveTo(px(ac)+CELL/2, py(1)); ctx.lineTo(px(ac)+CELL/2, py(ROWS-1)); ctx.stroke();
+  }
+  // Straps
+  ctx.fillStyle = 'rgba(120,120,130,0.4)';
+  for (let r = 1; r < ROWS-1; r++) {
+    if (!DOOR_ROWS.includes(r)) {
+      const sx = px(2)+CELL/2, sy = py(r)+8;
+      ctx.beginPath(); ctx.moveTo(sx-6,sy); ctx.lineTo(sx+6,sy); ctx.lineTo(sx,sy+10); ctx.closePath(); ctx.fill();
+    }
+  }
+}
+
+function drawSeats() {
+  for (const s of seats) {
+    const x = px(s.col), y = py(s.row);
+    if (s.occupied !== null) {
+      ctx.fillStyle = '#4a9ab5'; ctx.fillRect(x+2, y+3, CELL-4, CELL-6);
+      ctx.fillStyle = '#3a8aa5';
+      ctx.fillRect(x+(s.col===SEAT_L?2:CELL/2-2), y+5, CELL/2, CELL-10);
+    } else {
+      ctx.fillStyle = '#5bb8d4'; ctx.fillRect(x+2, y+3, CELL-4, CELL-6);
+      ctx.fillStyle = '#7ccce6'; ctx.fillRect(x+4, y+5, CELL-8, CELL-10);
+      const a = 0.25 + 0.2*Math.sin(frame*0.07);
+      ctx.strokeStyle = `rgba(74,222,128,${a+0.3})`; ctx.lineWidth = 2.5;
+      ctx.strokeRect(x+1, y+2, CELL-2, CELL-4);
+      ctx.fillStyle = `rgba(74,222,128,${a})`; ctx.fillRect(x+2, y+3, CELL-4, CELL-6);
+      ctx.fillStyle = `rgba(74,222,128,${a+0.4})`;
+      ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('空', x+CELL/2, y+CELL/2);
+    }
+  }
+}
+
+// ── Directional character sprite drawing ─────────────
+
+function drawPersonDir(cx, cy, t, facing) {
+  const sz = CELL * 0.8;
+  const headR = sz * 0.26;
+  const bodyW = sz * 0.5;
+  const bodyH = sz * 0.36;
+  const headY = cy - sz * 0.18;
+  const bodyY = cy + sz * 0.12;
+
+  const isBack = facing === 'u';
+  const isSide = facing === 'l' || facing === 'r';
+  const sideDir = facing === 'l' ? -1 : 1; // -1 left, +1 right
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  ctx.beginPath(); ctx.ellipse(cx, cy + sz*0.38, bodyW*0.6, 4, 0, 0, Math.PI*2); ctx.fill();
+
+  // Body
+  const bw = isSide ? bodyW * 0.7 : bodyW;
+  const bx = isSide ? cx + sideDir * 2 : cx;
+  ctx.fillStyle = t.bodyC;
+  ctx.beginPath(); ctx.roundRect(bx - bw/2, bodyY - bodyH/2, bw, bodyH, 4); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.1)'; ctx.fillRect(bx - bw/2, bodyY + 2, bw, bodyH/2 - 3);
+
+  // Shoulders
+  ctx.fillStyle = t.bodyC;
+  ctx.beginPath(); ctx.roundRect(bx - bw*0.65, bodyY - bodyH/2 + 2, bw*1.3, bodyH*0.35, 3); ctx.fill();
+
+  // Arms
+  if (isSide) {
+    // Side view: one arm visible
+    ctx.fillStyle = t.bodyC;
+    ctx.beginPath(); ctx.roundRect(bx + sideDir * bw * 0.4, bodyY - bodyH/4, 6, bodyH*0.7, 3); ctx.fill();
+    ctx.fillStyle = t.skinC;
+    ctx.beginPath(); ctx.arc(bx + sideDir * bw * 0.43, bodyY + bodyH*0.25, 3, 0, Math.PI*2); ctx.fill();
+  } else {
+    ctx.fillStyle = t.bodyC;
+    ctx.beginPath(); ctx.roundRect(cx - bw*0.65 - 2, bodyY - bodyH/4, 6, bodyH*0.7, 3); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(cx + bw*0.65 - 4, bodyY - bodyH/4, 6, bodyH*0.7, 3); ctx.fill();
+    ctx.fillStyle = t.skinC;
+    ctx.beginPath(); ctx.arc(cx - bw*0.65 + 1, bodyY + bodyH*0.25, 3, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx + bw*0.65 - 1, bodyY + bodyH*0.25, 3, 0, Math.PI*2); ctx.fill();
+  }
+
+  // Neck
+  const hx = isSide ? cx + sideDir * 2 : cx;
+  ctx.fillStyle = t.skinC;
+  ctx.fillRect(hx - 3, headY + headR*0.6, 6, 6);
+
+  // Head
+  ctx.fillStyle = t.skinC;
+  ctx.beginPath(); ctx.arc(hx, headY, headR, 0, Math.PI*2); ctx.fill();
+
+  // ── Hair (direction-aware) ──
+  ctx.fillStyle = t.hairC;
+  if (isBack) {
+    // Back view: full hair covering head
+    ctx.beginPath(); ctx.arc(hx, headY, headR + 1.5, 0, Math.PI * 2); ctx.fill();
+    // Re-draw a small skin area at bottom for neck
+    ctx.fillStyle = t.skinC;
+    ctx.beginPath(); ctx.arc(hx, headY + headR*0.5, headR*0.4, 0, Math.PI); ctx.fill();
+    ctx.fillStyle = t.hairC;
+    // Hair style differences on back
+    if (t.hair === 'long' || t.hair === 'twintail') {
+      ctx.beginPath(); ctx.roundRect(hx - headR - 2, headY + headR*0.2, headR*2 + 4, headR + 6, 3); ctx.fill();
+    }
+    if (t.hair === 'ponytail') {
+      ctx.beginPath(); ctx.roundRect(hx - 3, headY + headR*0.2, 6, headR + 8, 2); ctx.fill();
+    }
+    if (t.hair === 'twintail') {
+      ctx.beginPath(); ctx.roundRect(hx - headR - 4, headY + 2, 5, headR + 6, 2); ctx.fill();
+      ctx.beginPath(); ctx.roundRect(hx + headR - 1, headY + 2, 5, headR + 6, 2); ctx.fill();
+    }
+  } else if (isSide) {
+    // Side view hair
+    ctx.beginPath(); ctx.arc(hx, headY - 1, headR + 1, 0, Math.PI*2); ctx.fill();
+    // Re-expose the face side
+    ctx.fillStyle = t.skinC;
+    ctx.beginPath(); ctx.arc(hx + sideDir * 2, headY + 1, headR * 0.75, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = t.hairC;
+    // Hair extends behind
+    ctx.fillRect(hx - sideDir * headR, headY - headR, headR * 1.2, headR * 0.8);
+
+    if (t.hair === 'long') {
+      ctx.beginPath(); ctx.roundRect(hx - sideDir * (headR + 2), headY - 2, 6, headR*2 + 8, 3); ctx.fill();
+    }
+    if (t.hair === 'ponytail') {
+      ctx.beginPath(); ctx.roundRect(hx - sideDir * (headR + 2), headY - 4, 5, 14, 2); ctx.fill();
+    }
+    if (t.hair === 'twintail') {
+      ctx.beginPath(); ctx.roundRect(hx - sideDir * (headR + 2), headY + 1, 5, 12, 2); ctx.fill();
+    }
+    if (t.hair === 'messy') {
+      for (let i = 0; i < 3; i++) ctx.fillRect(hx - sideDir * (headR - i*3), headY - headR - 2 - i*2, 4, 5);
+    }
+    if (t.hair === 'perm') {
+      for (let a = 0; a < Math.PI*2; a += 0.6) {
+        ctx.beginPath(); ctx.arc(hx + Math.cos(a)*(headR+2), headY - 2 + Math.sin(a)*(headR+2), 3.5, 0, Math.PI*2); ctx.fill();
+      }
+    }
+    if (t.hair === 'bald') {
+      ctx.fillStyle = t.skinC;
+      ctx.beginPath(); ctx.arc(hx + sideDir * 2, headY - 1, headR, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = t.hairC;
+      ctx.fillRect(hx - sideDir * headR * 0.5, headY, headR * 0.5, 5);
+    }
+    if (t.hair === 'bob') {
+      ctx.beginPath(); ctx.roundRect(hx - sideDir * headR, headY - 2, headR + 4, headR + 4, 3); ctx.fill();
+      ctx.fillStyle = t.skinC;
+      ctx.beginPath(); ctx.arc(hx + sideDir * 3, headY + 2, headR * 0.6, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = t.hairC;
+    }
+
+    // Side face: one eye, nose, mouth
+    const eyeX = hx + sideDir * headR * 0.3;
+    const eyeY2 = headY + 1;
+    ctx.fillStyle = '#1a1a1a';
+    ctx.beginPath(); ctx.arc(eyeX, eyeY2, 1.8, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(eyeX + sideDir * 0.5, eyeY2 - 0.5, 0.7, 0, Math.PI*2); ctx.fill();
+    // Nose
+    ctx.fillStyle = 'rgba(180,140,120,0.4)';
+    ctx.beginPath(); ctx.arc(hx + sideDir * (headR * 0.7), headY + headR * 0.15, 1.5, 0, Math.PI*2); ctx.fill();
+    // Mouth
+    if (t.gender === 'f') {
+      ctx.fillStyle = '#d4766a';
+      ctx.beginPath(); ctx.arc(hx + sideDir * headR * 0.5, headY + headR * 0.5, 1.2, 0, Math.PI); ctx.fill();
+    } else {
+      ctx.strokeStyle = '#8a6a5a'; ctx.lineWidth = 0.8;
+      ctx.beginPath(); ctx.moveTo(hx + sideDir * headR * 0.3, headY + headR * 0.5);
+      ctx.lineTo(hx + sideDir * headR * 0.65, headY + headR * 0.5); ctx.stroke();
+    }
+    // Blush
+    if (t.gender === 'f') {
+      ctx.fillStyle = 'rgba(255,150,150,0.25)';
+      ctx.beginPath(); ctx.arc(eyeX + sideDir * 4, eyeY2 + 3, 2.5, 0, Math.PI*2); ctx.fill();
+    }
+  } else {
+    // Front facing (down)
+    switch (t.hair) {
+      case 'short':
+        ctx.beginPath(); ctx.arc(hx, headY-1, headR+1, Math.PI, 0); ctx.fill();
+        ctx.fillRect(hx-headR-1, headY-4, headR*2+2, 6); break;
+      case 'long':
+        ctx.beginPath(); ctx.arc(hx, headY-1, headR+1, Math.PI, 0); ctx.fill();
+        ctx.fillRect(hx-headR-1, headY-4, headR*2+2, 6);
+        ctx.beginPath(); ctx.roundRect(hx-headR-2, headY-2, 6, headR*2+8, 3); ctx.fill();
+        ctx.beginPath(); ctx.roundRect(hx+headR-4, headY-2, 6, headR*2+8, 3); ctx.fill(); break;
+      case 'ponytail':
+        ctx.beginPath(); ctx.arc(hx, headY-1, headR+1, Math.PI, 0); ctx.fill();
+        ctx.fillRect(hx-headR, headY-4, headR*2, 5); break;
+      case 'twintail':
+        ctx.beginPath(); ctx.arc(hx, headY-1, headR+1, Math.PI, 0); ctx.fill();
+        ctx.fillRect(hx-headR-1, headY-4, headR*2+2, 5);
+        ctx.beginPath(); ctx.roundRect(hx-headR-4, headY, 5, 14, 2); ctx.fill();
+        ctx.beginPath(); ctx.roundRect(hx+headR-1, headY, 5, 14, 2); ctx.fill(); break;
+      case 'bob':
+        ctx.beginPath(); ctx.arc(hx, headY-1, headR+2, Math.PI*0.85, Math.PI*0.15); ctx.fill();
+        ctx.fillRect(hx-headR-2, headY-4, headR*2+4, 6);
+        ctx.fillRect(hx-headR-2, headY-2, headR*2+4, headR+2);
+        ctx.fillStyle = t.skinC;
+        ctx.beginPath(); ctx.arc(hx, headY+2, headR*0.75, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = t.hairC; break;
+      case 'messy':
+        ctx.beginPath(); ctx.arc(hx, headY-2, headR+2, Math.PI, 0); ctx.fill();
+        for (let i = -2; i <= 2; i++) ctx.fillRect(hx+i*5-2, headY-headR-4-Math.abs(i)*2, 4, 6); break;
+      case 'bald':
+        ctx.beginPath(); ctx.arc(hx, headY-2, headR*0.5, Math.PI, 0); ctx.fill();
+        ctx.fillRect(hx-headR, headY-2, 4, 6); ctx.fillRect(hx+headR-4, headY-2, 4, 6); break;
+      case 'perm':
+        for (let a = 0; a < Math.PI*2; a += 0.5) {
+          ctx.beginPath(); ctx.arc(hx+Math.cos(a)*(headR+2), headY-2+Math.sin(a)*(headR+2), 4, 0, Math.PI*2); ctx.fill();
+        } break;
+    }
+    // Front eyes
+    const eyeY2 = headY + 1, esp = headR * 0.35;
+    ctx.fillStyle = '#1a1a1a';
+    ctx.beginPath(); ctx.arc(hx-esp, eyeY2, 1.8, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(hx+esp, eyeY2, 1.8, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(hx-esp-0.5, eyeY2-0.5, 0.7, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(hx+esp-0.5, eyeY2-0.5, 0.7, 0, Math.PI*2); ctx.fill();
+    if (t.gender === 'f') {
+      ctx.fillStyle = '#d4766a';
+      ctx.beginPath(); ctx.arc(hx, headY+headR*0.45, 1.5, 0, Math.PI); ctx.fill();
+      ctx.fillStyle = 'rgba(255,150,150,0.25)';
+      ctx.beginPath(); ctx.arc(hx-esp-3, eyeY2+3, 3, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(hx+esp+3, eyeY2+3, 3, 0, Math.PI*2); ctx.fill();
+    } else {
+      ctx.strokeStyle = '#8a6a5a'; ctx.lineWidth = 0.8;
+      ctx.beginPath(); ctx.moveTo(hx-2, headY+headR*0.45); ctx.lineTo(hx+2, headY+headR*0.45); ctx.stroke();
+    }
+  }
+
+  // ── Accessories ──
+  if (!isBack) {
+    switch (t.acc) {
+      case 'tie':
+        ctx.fillStyle = t.accC;
+        ctx.fillRect(bx-2, bodyY-bodyH/2+2, 4, bodyH*0.7);
+        ctx.beginPath(); ctx.moveTo(bx, bodyY+bodyH*0.15);
+        ctx.lineTo(bx-3, bodyY+bodyH*0.15-3); ctx.lineTo(bx+3, bodyY+bodyH*0.15-3);
+        ctx.closePath(); ctx.fill(); break;
+      case 'ribbon':
+        ctx.fillStyle = t.accC;
+        ctx.beginPath(); ctx.moveTo(hx, headY-headR-2);
+        ctx.lineTo(hx-5, headY-headR-6); ctx.lineTo(hx, headY-headR-3); ctx.lineTo(hx+5, headY-headR-6);
+        ctx.closePath(); ctx.fill(); break;
+      case 'headphones':
+        ctx.strokeStyle = t.accC; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.arc(hx, headY-4, headR+3, Math.PI*0.8, Math.PI*0.2); ctx.stroke();
+        ctx.fillStyle = t.accC;
+        ctx.beginPath(); ctx.arc(hx-headR-2, headY+1, 3.5, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(hx+headR+2, headY+1, 3.5, 0, Math.PI*2); ctx.fill(); break;
+      case 'bag':
+        ctx.fillStyle = t.accC;
+        const bs = isSide ? sideDir : 1;
+        ctx.beginPath(); ctx.roundRect(bx+bs*(bw*0.5+4), bodyY-2, 8, 12, 2); ctx.fill(); break;
+      case 'backpack':
+        ctx.fillStyle = t.accC;
+        ctx.beginPath(); ctx.roundRect(bx-bw*0.3, bodyY+bodyH*0.1, bw*0.6, bodyH*0.6, 3); ctx.fill(); break;
+    }
+  } else {
+    // Backpack visible from behind
+    if (t.acc === 'backpack') {
+      ctx.fillStyle = t.accC;
+      ctx.beginPath(); ctx.roundRect(bx-bw*0.35, bodyY-bodyH*0.3, bw*0.7, bodyH*0.8, 4); ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 0.8;
+      ctx.strokeRect(bx-bw*0.35, bodyY-bodyH*0.3, bw*0.7, bodyH*0.8);
+    }
+    if (t.acc === 'headphones') {
+      ctx.strokeStyle = t.accC; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(hx, headY-4, headR+3, Math.PI*0.8, Math.PI*0.2); ctx.stroke();
+      ctx.fillStyle = t.accC;
+      ctx.beginPath(); ctx.arc(hx-headR-2, headY+1, 3.5, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(hx+headR+2, headY+1, 3.5, 0, Math.PI*2); ctx.fill();
+    }
+  }
+
+  // Legs
+  const legC = (!isBack && t.gender === 'f' && (t.name.includes('女子高生') || t.name === 'OL')) ? t.skinC : '#2a2a3a';
+  ctx.fillStyle = legC;
+  ctx.fillRect(bx-5, bodyY+bodyH/2-2, 4, 6); ctx.fillRect(bx+1, bodyY+bodyH/2-2, 4, 6);
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(bx-6, bodyY+bodyH/2+3, 5, 3); ctx.fillRect(bx+1, bodyY+bodyH/2+3, 5, 3);
+}
+
+function drawPlayer(c, r, seated) {
+  const x = px(c) + CELL/2, y = py(r) + CELL/2;
+  const sz = CELL * 0.8;
+  const headR = sz * 0.28;
+  const bodyW = sz * 0.52, bodyH = sz * 0.38;
+  const headY0 = y - sz * 0.18, bodyY0 = y + sz * 0.12;
+  const f = player.facing;
+  const isBack = f === 'u';
+  const isSide = f === 'l' || f === 'r';
+  const sd = f === 'l' ? -1 : 1;
+
+  // Glow
+  const ga = 0.4 + 0.25 * Math.sin(frame * 0.08);
+  ctx.strokeStyle = `rgba(245,197,24,${ga})`; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(x, y, CELL*0.46, 0, Math.PI*2); ctx.stroke();
+
+  // YOU label
+  const fy = Math.sin(frame*0.12)*3;
+  ctx.fillStyle = '#f5c518'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+  ctx.fillText('▼ YOU ▼', x, py(r)-2+fy);
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.beginPath(); ctx.ellipse(x, y+sz*0.38, bodyW*0.65, 5, 0, 0, Math.PI*2); ctx.fill();
+
+  const bw = isSide ? bodyW * 0.7 : bodyW;
+  const bx = isSide ? x + sd * 2 : x;
+  const hx = bx;
+
+  // Body
+  ctx.fillStyle = '#ff6b35';
+  ctx.beginPath(); ctx.roundRect(bx-bw/2, bodyY0-bodyH/2, bw, bodyH, 5); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.1)'; ctx.fillRect(bx-bw/2, bodyY0+2, bw, bodyH/2-4);
+  ctx.fillStyle = '#ff6b35';
+  ctx.beginPath(); ctx.roundRect(bx-bw*0.68, bodyY0-bodyH/2+2, bw*1.36, bodyH*0.35, 4); ctx.fill();
+
+  // Hood strings (front only)
+  if (!isBack && !isSide) {
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x-3, bodyY0-bodyH/2+6); ctx.lineTo(x-3, bodyY0); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x+3, bodyY0-bodyH/2+6); ctx.lineTo(x+3, bodyY0); ctx.stroke();
+  }
+
+  // Arms
+  ctx.fillStyle = '#ff6b35';
+  if (isSide) {
+    ctx.beginPath(); ctx.roundRect(bx+sd*bw*0.4, bodyY0-bodyH/4, 7, bodyH*0.7, 3); ctx.fill();
+    ctx.fillStyle = '#f0c8a0';
+    ctx.beginPath(); ctx.arc(bx+sd*bw*0.43+3, bodyY0+bodyH*0.25, 3.5, 0, Math.PI*2); ctx.fill();
+  } else {
+    ctx.beginPath(); ctx.roundRect(x-bw*0.68-2, bodyY0-bodyH/4, 7, bodyH*0.7, 3); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(x+bw*0.68-5, bodyY0-bodyH/4, 7, bodyH*0.7, 3); ctx.fill();
+    ctx.fillStyle = '#f0c8a0';
+    ctx.beginPath(); ctx.arc(x-bw*0.68+1, bodyY0+bodyH*0.3, 3.5, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x+bw*0.68-1, bodyY0+bodyH*0.3, 3.5, 0, Math.PI*2); ctx.fill();
+  }
+
+  // Neck + Head
+  ctx.fillStyle = '#f0c8a0';
+  ctx.fillRect(hx-3, headY0+headR*0.5, 6, 7);
+  ctx.beginPath(); ctx.arc(hx, headY0, headR, 0, Math.PI*2); ctx.fill();
+
+  // Hair
+  ctx.fillStyle = '#1a0a00';
+  if (isBack) {
+    ctx.beginPath(); ctx.arc(hx, headY0, headR+1.5, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#f0c8a0';
+    ctx.beginPath(); ctx.arc(hx, headY0+headR*0.6, headR*0.35, 0, Math.PI); ctx.fill();
+  } else if (isSide) {
+    ctx.beginPath(); ctx.arc(hx, headY0-1, headR+1.5, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#f0c8a0';
+    ctx.beginPath(); ctx.arc(hx+sd*3, headY0+1, headR*0.7, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#1a0a00';
+    ctx.fillRect(hx-sd*headR, headY0-headR-1, headR*1.2, headR*0.7);
+    // Spiky front
+    ctx.fillRect(hx+sd*(headR-3), headY0-headR-2, 4, 5);
+  } else {
+    ctx.beginPath(); ctx.arc(hx, headY0-2, headR+1.5, Math.PI, 0); ctx.fill();
+    ctx.fillRect(hx-headR-1, headY0-5, headR*2+2, 7);
+    ctx.fillRect(hx-headR+2, headY0-headR-1, 4, 4);
+    ctx.fillRect(hx+headR-6, headY0-headR-1, 4, 4);
+  }
+
+  // Eyes
+  if (!isBack) {
+    const ey = headY0 + 1;
+    if (isSide) {
+      const ex = hx + sd * headR * 0.35;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.ellipse(ex, ey, 3.2, 2.8, 0, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#2c1810';
+      ctx.beginPath(); ctx.arc(ex+sd*0.3, ey+0.3, 2, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(ex+sd*0.8, ey-0.5, 0.8, 0, Math.PI*2); ctx.fill();
+      // Nose
+      ctx.fillStyle = 'rgba(200,160,140,0.5)';
+      ctx.beginPath(); ctx.arc(hx+sd*(headR*0.75), headY0+headR*0.15, 1.5, 0, Math.PI*2); ctx.fill();
+    } else {
+      const esp = headR * 0.38;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.ellipse(hx-esp, ey, 3.2, 2.8, 0, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(hx+esp, ey, 3.2, 2.8, 0, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#2c1810';
+      ctx.beginPath(); ctx.arc(hx-esp, ey+0.3, 2, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(hx+esp, ey+0.3, 2, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(hx-esp+0.8, ey-0.5, 0.8, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(hx+esp+0.8, ey-0.5, 0.8, 0, Math.PI*2); ctx.fill();
+    }
+    // Mouth
+    if (seated) {
+      ctx.strokeStyle = '#c0392b'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(hx+(isSide?sd*headR*0.3:0), headY0+headR*0.4, 3, 0.1, Math.PI-0.1); ctx.stroke();
+    } else {
+      ctx.strokeStyle = '#8a5a4a'; ctx.lineWidth = 1;
+      const mx = isSide ? hx+sd*headR*0.3 : hx;
+      ctx.beginPath(); ctx.moveTo(mx-2, headY0+headR*0.5); ctx.lineTo(mx+2, headY0+headR*0.45); ctx.stroke();
+    }
+  }
+
+  // Jeans
+  ctx.fillStyle = '#3b5998';
+  ctx.fillRect(bx-6, bodyY0+bodyH/2-2, 5, 7); ctx.fillRect(bx+1, bodyY0+bodyH/2-2, 5, 7);
+  ctx.fillStyle = '#e74c3c';
+  ctx.beginPath(); ctx.roundRect(bx-7, bodyY0+bodyH/2+4, 6, 4, 1); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(bx+1, bodyY0+bodyH/2+4, 6, 4, 1); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(bx-7, bodyY0+bodyH/2+7, 6, 1.5); ctx.fillRect(bx+1, bodyY0+bodyH/2+7, 6, 1.5);
+}
+
+// ── Game logic ───────────────────────────────────────
+
+function movePlayer(dc, dr) {
+  if (gameState !== 'playing' || player.seated) return;
+
+  // Update facing direction
+  if (dc === -1) player.facing = 'l';
+  else if (dc === 1) player.facing = 'r';
+  else if (dr === -1) player.facing = 'u';
+  else if (dr === 1) player.facing = 'd';
+
+  const nc = player.col + dc, nr = player.row + dr;
+  if (!inBounds(nc, nr)) return;
+
+  if (isSeat(nc, nr)) {
+    const seat = seatAt(nc, nr);
+    if (seat && seat.occupied === null) {
+      player.col = nc; player.row = nr;
+      player.seated = true; player.seatId = seat.id;
+      player.facing = nc === SEAT_L ? 'r' : 'l';
+      seat.occupied = 'player';
+      // Start pink glow, delay win overlay by 1 second
+      gameState = 'winning';
+      winGlowTimer = 60; // 60 frames = 1 second
+    }
+    return;
+  }
+  if (occupied(nc, nr)) return;
+  player.col = nc; player.row = nr;
+}
+
+function npcTrySit() {
+  const standing = npcs.filter(n => n.standing && !n.exiting);
+  shuffle(standing);
+  for (const n of standing) {
+    const dirs = [[0,-1],[0,1],[-1,0],[1,0]];
+    for (const [dc, dr] of dirs) {
+      const s = seatAt(n.col+dc, n.row+dr);
+      if (s && s.occupied === null && Math.random() < 0.35) {
+        n.col = s.col; n.row = s.row;
+        n.standing = false; n.seatId = s.id;
+        n.facing = facingFor(s.col, true);
+        s.occupied = n.id;
+        break;
+      }
+    }
+  }
+}
+
+// No more npcShuffle - standing people stay put
+
+function stationArrive() {
+  gameState = 'arriving';
+  const name = STATIONS[station];
+  const ann = document.getElementById('announce');
+  ann.textContent = `🚉 ${name}駅 に到着`;
+  ann.classList.add('show');
+  document.getElementById('stationName').textContent = name+'駅';
+  document.getElementById('sd'+station).classList.add('passed');
+
+  // --- Exiting people: move toward doors with animation ---
+  const seatedNpcs = npcs.filter(n => !n.standing && !n.exiting);
+  const seatExitCount = randi(2, Math.min(5, seatedNpcs.length));
+  shuffle(seatedNpcs);
+  for (let i = 0; i < seatExitCount; i++) {
+    const n = seatedNpcs[i];
+    const seat = seats.find(s => s.id === n.seatId);
+    if (seat) seat.occupied = null;
+    n.exiting = true; n.standing = true; n.seatId = null;
+    // Create exit animation toward nearest door
+    const nearDoor = n.row <= 5 ? DOOR_ROWS[0] : DOOR_ROWS[1];
+    boardingAnims.push({ type: n.type, entering: false, doorRow: nearDoor, progress: 0, side: Math.random() < 0.5 ? 'l' : 'r' });
+  }
+
+  const standNpcs = npcs.filter(n => n.standing && !n.exiting);
+  const standExitCount = randi(1, Math.min(4, standNpcs.length));
+  shuffle(standNpcs);
+  for (let i = 0; i < standExitCount; i++) {
+    standNpcs[i].exiting = true;
+    const nearDoor = standNpcs[i].row <= 5 ? DOOR_ROWS[0] : DOOR_ROWS[1];
+    boardingAnims.push({ type: standNpcs[i].type, entering: false, doorRow: nearDoor, progress: 0, side: Math.random() < 0.5 ? 'l' : 'r' });
+  }
+
+  setTimeout(() => {
+    npcs = npcs.filter(n => !n.exiting);
+    npcTrySit(); npcTrySit(); npcTrySit();
+
+    // --- Boarding animation: new people enter from doors ---
+    const newCount = randi(3, 8);
+    const spots = [];
+    for (let r = SEAT_R1; r <= SEAT_R2; r++) {
+      if (!occupied(1, r)) spots.push({col:1, row:r});
+      if (!occupied(3, r)) spots.push({col:3, row:r});
+    }
+    for (let r = 1; r <= ROWS-2; r++) {
+      if (!occupied(2, r)) spots.push({col:2, row:r});
+    }
+    shuffle(spots);
+    const actualNew = Math.min(newCount, spots.length);
+    for (let i = 0; i < actualNew; i++) {
+      if (!occupied(spots[i].col, spots[i].row)) {
+        const n = mkNpc(spots[i].col, spots[i].row, false);
+        // Create enter animation from nearest door
+        const nearDoor = spots[i].row <= 5 ? DOOR_ROWS[0] : DOOR_ROWS[1];
+        boardingAnims.push({ type: n.type, entering: true, doorRow: nearDoor, progress: 0, side: Math.random() < 0.5 ? 'l' : 'r' });
+      }
+    }
+
+    setTimeout(() => { npcTrySit(); npcTrySit(); }, 400);
+
+    ann.classList.remove('show');
+    station++;
+    if (station >= 5) { gameLose(); }
+    else { gameState = 'playing'; timer = STATION_INTERVAL; document.getElementById('stationName').textContent = '走行中...'; }
+    updateHud();
+  }, 2500);
+}
+
+function gameWin() {
+  gameState = 'ended';
+  document.getElementById('resultMsg').className = 'win';
+  document.getElementById('resultMsg').innerHTML = 'やっと座れたね！<br>着くまでゆっくり寝よう😌';
+  document.getElementById('overlay').classList.add('show');
+}
+function gameLose() {
+  gameState = 'ended';
+  document.getElementById('resultMsg').className = 'lose';
+  document.getElementById('resultMsg').innerHTML = '残念！何処にも座れなかった💦<br>そんな日もあるさ！';
+  document.getElementById('overlay').classList.add('show');
+}
+function updateHud() { document.getElementById('crowdCount').textContent = npcs.filter(n=>!n.exiting).length+1; }
+function updateTimer() {
+  if (gameState !== 'playing') return;
+  document.getElementById('timer').textContent = `${Math.floor(timer/60)}:${(timer%60).toString().padStart(2,'0')}`;
+}
+
+// ── Main loop ────────────────────────────────────────
+
+function draw() {
+  ctx.clearRect(0, 0, CW, CH);
+
+  // Train vibration - subtle shaking when running
+  let shakeX = 0, shakeY = 0;
+  if (gameState === 'playing' || gameState === 'winning') {
+    shakeX = Math.sin(frame * 0.12) * 0.8 + Math.sin(frame * 0.29) * 0.4;
+    shakeY = Math.cos(frame * 0.17) * 0.5 + Math.sin(frame * 0.37) * 0.3;
+  }
+  ctx.save();
+  ctx.translate(shakeX, shakeY);
+
+  drawTrain();
+  drawSeats();
+
+  // Seated NPCs
+  for (const n of npcs) if (!n.standing && !n.exiting)
+    drawPersonDir(px(n.col)+CELL/2, py(n.row)+CELL/2, n.type, n.facing);
+  // Standing NPCs
+  for (const n of npcs) if (n.standing && !n.exiting)
+    drawPersonDir(px(n.col)+CELL/2, py(n.row)+CELL/2, n.type, n.facing);
+  // Exiting
+  for (const n of npcs) if (n.exiting) {
+    ctx.globalAlpha = 0.35;
+    drawPersonDir(px(n.col)+CELL/2, py(n.row)+CELL/2, n.type, n.facing);
+    ctx.globalAlpha = 1;
+  }
+  // Player
+  if (player) drawPlayer(player.col, player.row, player.seated);
+
+  // Pink glow when player just sat down
+  if (gameState === 'winning' && player && player.seated) {
+    const sx = px(player.col), sy = py(player.row);
+    const glowR = CELL * 1.5;
+    const grad = ctx.createRadialGradient(sx+CELL/2, sy+CELL/2, 0, sx+CELL/2, sy+CELL/2, glowR);
+    const pulseA = 0.35 + 0.15 * Math.sin(frame * 0.15);
+    grad.addColorStop(0, `rgba(255,150,180,${pulseA})`);
+    grad.addColorStop(0.5, `rgba(255,180,200,${pulseA * 0.5})`);
+    grad.addColorStop(1, 'rgba(255,180,200,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(sx+CELL/2 - glowR, sy+CELL/2 - glowR, glowR*2, glowR*2);
+
+    // Small hearts floating up
+    const heartCount = 3;
+    for (let i = 0; i < heartCount; i++) {
+      const hx2 = sx + CELL/2 + Math.sin(frame*0.05 + i*2.1) * 20;
+      const hy2 = sy - (frame * 0.8 + i * 15) % 50;
+      const ha = 1 - ((frame * 0.8 + i * 15) % 50) / 50;
+      ctx.fillStyle = `rgba(255,100,150,${ha * 0.6})`;
+      ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('\u2665', hx2, hy2);
+    }
+  }
+
+  // Boarding/departing animations at doors
+  for (const ba of boardingAnims) {
+    const doorX = ba.side === 'l' ? OX - 20 : OX + COLS * CELL + 20;
+    const doorY = py(ba.doorRow) + CELL / 2;
+    const insideX = ba.side === 'l' ? OX + CELL * 1.5 : OX + COLS * CELL - CELL * 1.5;
+
+    let drawX, alpha;
+    if (ba.entering) {
+      drawX = doorX + (insideX - doorX) * ba.progress;
+      alpha = Math.min(1, ba.progress * 2);
+    } else {
+      drawX = insideX + (doorX - insideX) * ba.progress;
+      alpha = Math.max(0, 1 - ba.progress * 1.5);
+    }
+
+    ctx.globalAlpha = alpha * 0.7;
+    drawPersonDir(drawX, doorY, ba.type, ba.entering ? (ba.side === 'l' ? 'r' : 'l') : (ba.side === 'l' ? 'l' : 'r'));
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.restore(); // end train vibration transform
+
+  if (gameState === 'arriving') {
+    const a = 0.06 + 0.04*Math.sin(frame*0.2);
+    ctx.fillStyle = `rgba(245,197,24,${a})`; ctx.fillRect(0,0,CW,CH);
+  }
+}
+
+function loop() {
+  frame++;
+  if (gameState === 'playing') {
+    if (frame%60===0) { timer--; updateTimer(); if (timer<=0) stationArrive(); }
+    if (frame%60===0) npcTrySit();
+    if (frame%120===0) updateHud();
+  }
+  // Winning pink glow countdown
+  if (gameState === 'winning') {
+    winGlowTimer--;
+    if (winGlowTimer <= 0) {
+      gameWin();
+    }
+  }
+  // Update boarding animations
+  for (const ba of boardingAnims) {
+    ba.progress += 0.02;
+  }
+  boardingAnims = boardingAnims.filter(ba => ba.progress < 1);
+
+  draw();
+  requestAnimationFrame(loop);
+}
+
+function startGame() {
+  document.getElementById('startScreen').style.display = 'none';
+  init(); gameState = 'playing'; updateTimer();
+}
+function restartGame() {
+  document.getElementById('overlay').classList.remove('show');
+  for (let i=0;i<5;i++) document.getElementById('sd'+i).classList.remove('passed');
+  document.getElementById('stationName').textContent = '走行中...';
+  init(); gameState = 'playing'; updateTimer();
+}
+
+document.addEventListener('keydown', e => {
+  const map = {ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0],
+    w:[0,-1],W:[0,-1],s:[0,1],S:[0,1],a:[-1,0],A:[-1,0],d:[1,0],D:[1,0]};
+  const m = map[e.key];
+  if (m) { e.preventDefault(); movePlayer(m[0],m[1]); }
+});
+
+// Touch/tap controls: tap direction relative to player to move
+function handleTap(clientX, clientY) {
+  if (!player || gameState !== 'playing' || player.seated) return;
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = CW / rect.width;
+  const scaleY = CH / rect.height;
+  const tapX = (clientX - rect.left) * scaleX;
+  const tapY = (clientY - rect.top) * scaleY;
+
+  const playerCX = px(player.col) + CELL / 2;
+  const playerCY = py(player.row) + CELL / 2;
+  const dx = tapX - playerCX;
+  const dy = tapY - playerCY;
+
+  // Determine direction based on which axis has larger delta
+  if (Math.abs(dx) > Math.abs(dy)) {
+    movePlayer(dx > 0 ? 1 : -1, 0);
+  } else {
+    movePlayer(0, dy > 0 ? 1 : -1);
+  }
+}
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const t = e.touches[0];
+  handleTap(t.clientX, t.clientY);
+}, { passive: false });
+
+canvas.addEventListener('click', e => {
+  handleTap(e.clientX, e.clientY);
+});
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

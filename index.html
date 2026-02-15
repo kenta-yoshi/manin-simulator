@@ -29,6 +29,8 @@ body {
 #timer { font-size: 20px; font-weight: bold; color: #f5c518; }
 canvas { border: 2px solid #1a3a6a; border-top: none; display: block; touch-action: none; max-width: 100vw; }
 @media (max-width: 440px) {
+  body { align-items: flex-start; }
+  #gameContainer { width: 100vw; }
   #hud, #bottomBar { width: 100vw; font-size: 11px; padding: 6px 8px; border-radius: 0; }
   canvas { width: 100vw; height: auto; }
   #overlay, #startScreen { border-radius: 0; }
@@ -1015,6 +1017,26 @@ canvas.addEventListener('touchstart', e => {
 canvas.addEventListener('click', e => {
   handleTap(e.clientX, e.clientY);
 });
+
+// Mobile: resize canvas to fill viewport height
+function resizeForMobile() {
+  if (window.innerWidth > 440) return;
+  const hud = document.getElementById('hud');
+  const bar = document.getElementById('bottomBar');
+  const hudH = hud.offsetHeight;
+  const barH = bar.offsetHeight;
+  const availH = window.innerHeight - hudH - barH;
+  const availW = window.innerWidth;
+  // Scale canvas to fill available space
+  const scaleW = availW / CW;
+  const scaleH = availH / CH;
+  const scale = Math.min(scaleW, scaleH);
+  canvas.style.width = (CW * scale) + 'px';
+  canvas.style.height = (CH * scale) + 'px';
+}
+window.addEventListener('resize', resizeForMobile);
+window.addEventListener('load', resizeForMobile);
+resizeForMobile();
 
 requestAnimationFrame(loop);
 </script>
